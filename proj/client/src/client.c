@@ -2,9 +2,13 @@
 #include <fcntl.h>
 #include <sys/wait.h>
 #include <sys/types.h>
+#include <sys/stat.h>
 
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
+
+#include "utils.h"
 
 #define SERVER_FIFO "sv_fifo"
 #define MSG_BUF_LEN (size_t)307
@@ -15,18 +19,11 @@
 #define REQ_STAT (char)3        //REQUEST STATUS
 
 
-int is_number (const char* str) { //maybe should be on utils?
-    size_t i;
-    size_t len = strlen(str);
-    for(i = 0; i < len; i++) {
-        if(str[i] < '0' || str[i] > '9') return 0;
-    }
-    return 1;
-}
-
 
 /**
  * Function used to check if arguments given to client program are correctly formatted.
+ * returns 0 - wrongly formatted
+ * returns 1 - all good
 */
 int check_format (int argc, char ** argv) {
     unsigned char type_flag = 0;
@@ -61,8 +58,8 @@ int check_format (int argc, char ** argv) {
     if(type_flag == 2) return 1; //early return in case of status
 
     //checks if time field is correctly formatted
-    if(!(is_number(argv[2]))) {
-        write(STDOUT_FILENO, "'time' field is not acceptable (maybe negative?)!\n", 51);
+    if(!(is_positive_integer(argv[2]))) {
+        write(STDOUT_FILENO, "'time' field is wrongly formatted (maybe negative?)!\n", 54);
         return 0;
     }
     
@@ -84,11 +81,14 @@ int check_format (int argc, char ** argv) {
  * Main function of the client program.
 */
 int main (int argc, char ** argv) {
-    unsigned char format_flag;
-    format_flag = check_format(argc, argv); //check format of args
-    if(format_flag == 0) return 1;
+    if(check_format(argc, argv) == 0) return 1;
 
-    int fd = open(SERVER_FIFO, O_WRONLY); //open server fifo
+    int request_pipe = open(SERVER_FIFO, O_WRONLY); //opens request pipe (client to server)
+
+    if(request_pipe < 0) {              //stops if pipe cant open
+        perror("open request_pipe");
+        return 1;
+    }
 
 
     //SELECT WHICH MESSAGE TYPE TO SEND
@@ -116,7 +116,26 @@ int main (int argc, char ** argv) {
     msg_buf[4] = (pid)    &0xFF;
     //=====================================
 
-    write(fd, msg_buf, 5); //send connect request
+    char number[16];
+    itoa(pid, number, 10); //store pid in string format
+
+    int ff = mkfifo(number, 0666);
+    int feedback_pipe = open(number, O_RDONLY); //opens feedback pipe (server to client)
+
+    if(ff < 0) {
+        perror("mkfifo");
+        return 1;
+    }
+    if(feedback_pipe < 0) {
+        perror("open feedback_pipe");
+        return 1;
+    }
+
+    write(request_pipe, msg_buf, 5); //send connect request
+
+    
+
+    
 
     /**
      * BUILD AND SEND ACTUAL REQUEST
@@ -130,9 +149,9 @@ int main (int argc, char ** argv) {
     msg_buf[3] = (pid>>8) &0xFF;
     msg_buf[4] = (pid)    &0xFF;
     //=====================================
-
+    
     if(msg_type == REQ_STAT) {
-        write(fd, msg_buf, 5);
+        write(request_pipe, msg_buf, 5);
     }
     else {
         unsigned short msg_len = (unsigned short)strlen(argv[4]);
@@ -145,7 +164,7 @@ int main (int argc, char ** argv) {
             read++;
         }
 
-        write(fd, msg_buf, 7 + msg_len);
+        write(request_pipe, msg_buf, 7 + msg_len);
     }
 
     /**
@@ -155,7 +174,7 @@ int main (int argc, char ** argv) {
     //===================================================================
     //===============================TODO================================
     //===================================================================
-
+    
 
     return 0;
 }
