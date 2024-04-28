@@ -13,11 +13,9 @@
 #define SERVER_FIFO "sv_fifo"
 #define MSG_BUF_LEN (size_t)307
 
-#define REQ_CON (char)0         //REQUEST CONNECTION (through pipe)
 #define REQ_EXEU (char)1        //REQUEST EXECUTE (single)
 #define REQ_EXEP (char)2        //REQUEST EXECUTE (multiple)
 #define REQ_STAT (char)3        //REQUEST STATUS
-
 
 
 /**
@@ -106,8 +104,8 @@ int main (int argc, char ** argv) {
     /**
      * BUILD AND SEND CONNECTION REQUEST
     */
-
-    msg_buf[0] = REQ_CON;
+   
+    msg_buf[0] = msg_type;
     
     //=========WRITE PID TO BUFFER=========
     msg_buf[1] = (pid>>24)&0xFF;
@@ -116,56 +114,39 @@ int main (int argc, char ** argv) {
     msg_buf[4] = (pid)    &0xFF;
     //=====================================
 
-    char number[16];
+    char number[33];
     itoa(pid, number, 10); //store pid in string format
 
     int ff = mkfifo(number, 0666);
-    int feedback_pipe = open(number, O_RDONLY); //opens feedback pipe (server to client)
+    
 
     if(ff < 0) {
         perror("mkfifo");
         return 1;
     }
+    
+
+    unsigned short msg_len;
+    if(msg_type == REQ_STAT) msg_len = 0;
+    else msg_len = (unsigned short)strlen(argv[4]);
+    msg_buf[5] = (msg_len>>8)&0xFF;
+    msg_buf[6] = (msg_len)   &0xFF;
+
+    unsigned short i, read_iter = 0;
+    for(i = 7; i < msg_len+7; i++){
+        msg_buf[i] = argv[4][read_iter];
+        read_iter++;
+    }
+
+    write(request_pipe, msg_buf, 7 + msg_len);
+
+    int feedback_pipe = open(number, O_RDONLY); //opens feedback pipe (server to client)
+    
     if(feedback_pipe < 0) {
         perror("open feedback_pipe");
         return 1;
     }
 
-    write(request_pipe, msg_buf, 5); //send connect request
-
-    
-
-    
-
-    /**
-     * BUILD AND SEND ACTUAL REQUEST
-    */
-
-    msg_buf[0] = msg_type;
-
-    //=========WRITE PID TO BUFFER=========
-    msg_buf[1] = (pid>>24)&0xFF;
-    msg_buf[2] = (pid>>16)&0xFF;                    //maybe pointless? change later
-    msg_buf[3] = (pid>>8) &0xFF;
-    msg_buf[4] = (pid)    &0xFF;
-    //=====================================
-    
-    if(msg_type == REQ_STAT) {
-        write(request_pipe, msg_buf, 5);
-    }
-    else {
-        unsigned short msg_len = (unsigned short)strlen(argv[4]);
-        msg_buf[5] = (msg_len>>8)&0xFF;
-        msg_buf[6] = (msg_len)   &0xFF;
-
-        unsigned short i, read = 0;
-        for(i = 7; i < msg_len+7; i++){
-            msg_buf[i] = argv[4][read];
-            read++;
-        }
-
-        write(request_pipe, msg_buf, 7 + msg_len);
-    }
 
     /**
      * READ FEEDBACK FROM SERVER
@@ -174,6 +155,24 @@ int main (int argc, char ** argv) {
     //===================================================================
     //===============================TODO================================
     //===================================================================
+
+    if(msg_type == REQ_EXEU || msg_type == REQ_EXEP) {
+        int task_number;
+        char task_buffer[4];
+        read(feedback_pipe, task_buffer, 4);
+
+        task_number = (task_buffer[0] << 24 | task_buffer[1] << 16 | task_buffer[2] << 8 | task_buffer[3]);
+        
+        char number_buff[33];
+        itoa(task_number, number_buff, 10);
+        write(STDOUT_FILENO, "Task ", 6);
+        write(STDOUT_FILENO, number_buff, strlen(number_buff));
+        write(STDOUT_FILENO, " received!\n", 12);
+    }
+
+    else {
+
+    }
     
 
     return 0;
