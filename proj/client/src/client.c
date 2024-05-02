@@ -96,7 +96,7 @@ int main (int argc, char ** argv) {
     else if(strcmp(argv[1], "execute") == 0 && strcmp(argv[3], "-p") == 0) msg_type = REQ_EXEP;
 
     //MAIN MESSAGE BUFFER
-    char msg_buf[MSG_BUF_LEN];
+    unsigned char msg_buf[MSG_BUF_LEN];
 
     //PROGRAM PID
     pid_t pid = getpid();
@@ -108,10 +108,10 @@ int main (int argc, char ** argv) {
     msg_buf[0] = msg_type;
     
     //=========WRITE PID TO BUFFER=========
-    msg_buf[1] = (pid>>24)&0xFF;
-    msg_buf[2] = (pid>>16)&0xFF;
-    msg_buf[3] = (pid>>8) &0xFF;
-    msg_buf[4] = (pid)    &0xFF;
+    msg_buf[1] = (pid)     &0xFF;
+    msg_buf[2] = (pid>>8)  &0xFF;
+    msg_buf[3] = (pid>>16) &0xFF;
+    msg_buf[4] = (pid>>24) &0xFF;
     //=====================================
 
     char number[33];
@@ -128,9 +128,11 @@ int main (int argc, char ** argv) {
 
     unsigned short msg_len;
     if(msg_type == REQ_STAT) msg_len = 0;
-    else msg_len = (unsigned short)strlen(argv[4]);
-    msg_buf[5] = (msg_len>>8)&0xFF;
-    msg_buf[6] = (msg_len)   &0xFF;
+    else msg_len = (unsigned short)strlen(argv[4]) + 1;
+    msg_buf[5] = (msg_len)    &0xFF;
+    msg_buf[6] = (msg_len>>8) &0xFF;
+
+    printf("%hu\n", msg_len);
 
     unsigned short i, read_iter = 0;
     for(i = 7; i < msg_len+7; i++){
@@ -138,9 +140,17 @@ int main (int argc, char ** argv) {
         read_iter++;
     }
 
+    printf("(%d %d %d %d)\n", msg_buf[1], msg_buf[2], msg_buf[3], msg_buf[4]);
+
+    printf("Request sent (pid is %d)!\n", pid);
+
     write(request_pipe, msg_buf, 7 + msg_len);
 
+    close(request_pipe);
+
+    printf("Opening feedback pipe...\n");
     int feedback_pipe = open(number, O_RDONLY); //opens feedback pipe (server to client)
+    printf("Done!");
     
     if(feedback_pipe < 0) {
         perror("open feedback_pipe");
@@ -158,10 +168,10 @@ int main (int argc, char ** argv) {
 
     if(msg_type == REQ_EXEU || msg_type == REQ_EXEP) {
         int task_number;
-        char task_buffer[4];
-        read(feedback_pipe, task_buffer, 4);
 
-        task_number = (task_buffer[0] << 24 | task_buffer[1] << 16 | task_buffer[2] << 8 | task_buffer[3]);
+        printf("Reading reply...\n");
+        read(feedback_pipe, &task_number, 4);
+        printf("Done!\n");
         
         char number_buff[33];
         itoa(task_number, number_buff, 10);
@@ -174,6 +184,6 @@ int main (int argc, char ** argv) {
 
     }
     
-
+    unlink(number);
     return 0;
 }

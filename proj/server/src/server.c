@@ -13,12 +13,38 @@
 #define SERVER_FIFO "sv_fifo"
 #define MAX_TASKS 100 //tem de ser dado como arg
 
-#define SCHED_DEF 1 //ASSUME DEFAULT IS TYPE 1
-#define SCHED_1 1 //scheduling type 1 (todo) 
+#define SCHED_DEF 1     //ASSUME DEFAULT IS TYPE 1
+#define SCHED_FCFS 1    //scheduling type 1 - First come first served.
+#define SCHED_SJF 2     //scheduling type 2 - Shortest Job First
 
-#define REQ_EXEU (char)1        //REQUEST EXECUTE (single)
-#define REQ_EXEP (char)2        //REQUEST EXECUTE (multiple)
-#define REQ_STAT (char)3        //REQUEST STATUS
+#define REQ_EXEU (unsigned char)1        //REQUEST EXECUTE (single)
+#define REQ_EXEP (unsigned char)2        //REQUEST EXECUTE (multiple)
+#define REQ_STAT (unsigned char)3        //REQUEST STATUS
+
+
+//stuff related to request queue
+
+struct request_queue {
+    unsigned char type;
+    unsigned int task_number;
+    char * to_execute;
+    struct request_queue* next;
+};
+
+struct request_queue* new_queue_node () {
+    struct request_queue* new_node = malloc(sizeof(struct request_queue));
+    new_node->type = 0;
+    new_node->task_number = 0;
+    new_node->to_execute = NULL;
+    new_node->next = NULL;
+    return new_node;
+}
+
+struct request_queue* get_tail (struct request_queue* head) {
+    struct request_queue* tmp = head;
+    while(tmp->next) tmp = tmp->next;
+    return tmp;
+}
 
 // pipe de leitura tem formato pid + n + mensagem
 
@@ -40,16 +66,17 @@ int check_format (int argc, char **argv) {
     }
 }
 
+struct request_queue* queue_head;
 unsigned int task_number;
 
 int main(int argc, char **argv) {
     if(check_format(argc, argv) == 0) return 1;
+    queue_head == NULL;
 
     task_number = 0;
 
     char req_type;                  //request type
     int  req_pid;                   //requester pid
-    char req_pid_buf[4];
     unsigned short req_msg_len;     //message lenght
     char buffer_msg[300];           //message buffer
     int req_fd;                     //file descriptor for server to client fifo
@@ -57,48 +84,58 @@ int main(int argc, char **argv) {
     mkfifo(SERVER_FIFO, 0666);
 
     // Abrir o pipe de leitura
-    req_fd = open(SERVER_FIFO, O_RDONLY);
-
-    if (req_fd < 0) {
-        perror("Erro ao abrir request pipe");
-        exit(1);
-    }
+    
 
     while(1) {
+        req_fd = open(SERVER_FIFO, O_RDONLY);
+        task_number++;
+
+        if (req_fd < 0) {
+            perror("Erro ao abrir request pipe");
+            return 1;
+        }
+
         read(req_fd, &req_type, 1);
-        read(req_fd, req_pid_buf, 4);
+        read(req_fd, &req_pid, 4);
         read(req_fd, &req_msg_len, 2);
         read(req_fd, buffer_msg, req_msg_len);
 
-        req_pid = (req_pid_buf[0] << 24 | req_pid_buf[1] << 16 | req_pid_buf[2] << 8 | req_pid_buf[3]);
+        printf("%hu\n", req_msg_len);
 
-        int pid = fork();
-        if(pid == 0) {
-            char req_pid_string[33];
-            itoa(req_pid, req_pid_string, 10);
-            int feedback = open(req_pid_string, O_WRONLY);
+        //printf("Requester pid is %d!\n", req_pid);
 
-            if(req_type == REQ_EXEU || req_type == REQ_EXEP) {
-                task_number++;
-                char sv_to_client[4];
-                int nmb = task_number;
-                sv_to_client[0] = (nmb >> 24) & 0xFF;
-                sv_to_client[1] = (nmb >> 16) & 0xFF;
-                sv_to_client[2] = (nmb >> 8)  & 0xFF;
-                sv_to_client[3] = (nmb)       & 0xFF;
+        char req_pid_string[33];
+        itoa(req_pid, req_pid_string, 10);
+        
+        int feedback = open(req_pid_string, O_WRONLY);
+        if(req_type == REQ_EXEU || req_type == REQ_EXEP) {
+            //printf("Writing reply to client...\n");
+            write(feedback, &task_number, 4);
+            //printf("Done!\n");
+            //place request in queue
+            struct request_queue* new_request = new_queue_node();
+            new_request->type = req_type;
+            new_request->task_number = task_number;
+            new_request->to_execute = malloc((size_t)req_msg_len);
+            strcpy(new_request->to_execute, buffer_msg);
 
-                write(feedback, sv_to_client, 4);
-
-                //handle request here -- TODO
+            if(queue_head == NULL) {
+                queue_head = new_request;
             }
             else {
-                //status here
+                struct request_queue* tail = get_tail(queue_head);
+                tail->next = new_request;
             }
-            close(feedback);
-            _exit(0);
         }
+        else {
+            //status here
+            break;
+        }
+        close(feedback);
+        //_exit(0);
+        
 
-
+        close(req_fd);
     }
 
 
