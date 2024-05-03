@@ -8,7 +8,7 @@
 #include <sys/time.h>
 
 #include "utils.h"
-//#include "request_handler.h"
+#include "request_handler.h"
 
 #define SERVER_FIFO "sv_fifo"
 #define MAX_TASKS 100 //tem de ser dado como arg
@@ -122,6 +122,11 @@ int main(int argc, char **argv) {
         if (req_fd < 0) {
             perror("Erro ao abrir request pipe");
             return 1;
+        }
+
+        if(queue_head != NULL) {
+            handle_commmand(queue_head->type, queue_head->task_number, queue_head->to_execute, out_fd);
+            queue_head = queue_head->next;
         }
 
         read(req_fd, &req_type, 1);

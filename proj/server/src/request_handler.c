@@ -30,7 +30,7 @@ void handle_commmand(unsigned char type, unsigned int task_number, const char *t
 
         execvp(tokens[0], tokens);
     }
-    else if(type == REQ_EXEP) {
+    /*else if(type == REQ_EXEP) {
         int num_comandos = 0;
         char *commands[1];
         char *token = strtok(to_execute, "|");
@@ -71,5 +71,6 @@ void handle_commmand(unsigned char type, unsigned int task_number, const char *t
 
         int elapsed_time = (end_time.tv_sec - start_time.tv_sec) * 1000 + (end_time.tv_usec - start_time.tv_usec) / 1000;
     }
+    */
 
 }

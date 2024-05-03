@@ -2,7 +2,9 @@
 
 #ALL (CREATE DIR, CREATE CLIENT, CREATE SERVER)
 
-all: dir client server
+all: dir
+	@gcc server/src/server.c server/src/request_handler.c utils/src/utils.c  -Iutils/include/ -Iserver/include/ -o bin/server
+	@gcc client/src/client.c utils/src/utils.c -Iutils/include/ -o bin/client
 	@echo Done!
 
 #CLIENT PROGRAM COMPILE
@@ -28,8 +30,8 @@ clean:
 	@echo Cleaning up...
 	@rm -f ./bin/*
 	@rm -f ./obj/*
-	@rmdir ./bin
-	@rmdir ./obj
+	#@rmdir ./bin
+	#@rmdir ./obj
 	@echo Done!
 
 #REMAKES ENTIRE PROJECT (AFTER CLEAN)
