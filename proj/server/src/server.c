@@ -70,10 +70,41 @@ struct request_queue* queue_head;
 unsigned int task_number;
 
 int main(int argc, char **argv) {
-    if(check_format(argc, argv) == 0) return 1;
+    int i;                          //general iterator
+    int concurrent_processes;
+    int max_concurrect_processes;
     queue_head == NULL;
 
-    task_number = 0;
+    if(check_format(argc, argv) == 0) return 1;
+    max_concurrect_processes = atoi(argv[2]);
+
+    size_t s_len = strlen(argv[1]);
+
+    char *output_file_path = calloc(s_len + 4, sizeof(char));
+    for(i = 0; i < s_len; i++) {
+        output_file_path[i] = argv[1][i];
+    }
+    output_file_path[s_len] = 'l';
+    output_file_path[s_len+1] = 'o';
+    output_file_path[s_len+2] = 'g';
+    output_file_path[s_len+3] = 0;
+
+    int out_fd = open(output_file_path, O_CREAT | O_RDWR, S_IRWXU | S_IRWXG | S_IRWXO);
+
+    if(out_fd < 0) {
+        perror("open output file");
+        return 1;
+    }
+
+    lseek(out_fd, 0, SEEK_SET);
+
+    int bytes_read = read(out_fd, &task_number, 4);
+    if(bytes_read == 0) task_number = 0;
+
+    lseek(out_fd, 0, SEEK_SET);
+    write(out_fd, &task_number, 4);
+
+    //task_number = 0;
 
     char req_type;                  //request type
     int  req_pid;                   //requester pid
@@ -88,8 +119,6 @@ int main(int argc, char **argv) {
 
     while(1) {
         req_fd = open(SERVER_FIFO, O_RDONLY);
-        task_number++;
-
         if (req_fd < 0) {
             perror("Erro ao abrir request pipe");
             return 1;
@@ -109,6 +138,10 @@ int main(int argc, char **argv) {
         
         int feedback = open(req_pid_string, O_WRONLY);
         if(req_type == REQ_EXEU || req_type == REQ_EXEP) {
+            task_number++;
+            lseek(out_fd, 0, SEEK_SET);
+            write(out_fd, &task_number, 4);
+
             //printf("Writing reply to client...\n");
             write(feedback, &task_number, 4);
             //printf("Done!\n");

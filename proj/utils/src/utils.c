@@ -12,41 +12,6 @@
  * radix - base of conversion
  * returns length of the number string
 */
-int itoa2 (int value, char *buffer, int radix) {
-    if(radix < 2) return -1;
-
-    char tmp[16];
-    char *tp;
-
-    int i;
-    unsigned v;
-
-    int sign = (radix == 10 && value < 0);
-    if(sign) v = -value;
-    else v = (unsigned)value;
-
-    while(v || tp == tmp) {
-        i = v % radix;
-        v /= radix;
-        if(i < 10) *tp++ = i+'0';
-        else *tp++ = i + 'a' - 10;
-    } 
-
-    int len = tp - tmp;
-
-    if(sign) {
-        *buffer++ = '-';
-        len++;
-    }
-
-    while(tp > tmp) 
-        *buffer++ = *--tp;
-    
-    *buffer = '\0';
-
-    return len;
-}
-
 int itoa (int value, char *buffer, int radix) {
     char temp[33];
     int i = 0, sign = 0;
@@ -93,5 +58,47 @@ int is_positive_integer (const char* str) {
         if(str[i] < '0' || str[i] > '9') return 0;
     }
     return 1;
+}
+
+/**
+ * separate_string will separate given string s into many tokens. This separation will 
+ * happen at any occurrence of the separator character. The tokens will be stored in 
+ * the empty_storage, as this is it's only purpose. Returns the number of tokens generated.
+ * Empty storage is allocated here. Will have one extra 'token' that is NULL.
+*/
+int separate_string (const char *s, char separator, char **empty_storage) {
+    int i, j, k, tok_count = 2; //i and j are common iterators. tok_count will be return value containing number of tokens
+    size_t s_len = strlen(s) + 1;
+    for(i = 0; s[i]; i++) {
+        if(s[i] == separator) tok_count++;
+    }
+
+
+
+    empty_storage = calloc(tok_count, sizeof(char*));
+    i = 0;
+    while(i < tok_count - 1) {
+        empty_storage[i] = calloc(s_len, sizeof(char));
+        i++;
+    }
+    empty_storage[i] = NULL;
+
+    i = 0;
+    j = 0;
+    k = 0;
+
+    for(i; s[i]; i++) {
+        if(s[i] != separator) {
+            empty_storage[k][j] = s[i];
+            j++;
+        }
+        else {
+            empty_storage[k][j] = 0;
+            k++;
+            j = 0;
+        }
+    }
+
+    return tok_count;
 }
 
