@@ -9,6 +9,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "utils.h"
+
 #define REQ_CON (char)0         //REQUEST CONNECTION (through pipe)
 #define REQ_EXEU (char)1        //REQUEST EXECUTE (single)
 #define REQ_EXEP (char)2        //REQUEST EXECUTE (multiple)
@@ -22,13 +24,24 @@ void handle_commmand(unsigned char type, unsigned int task_number, const char *t
     struct timeval start_time, end_time;
 
     if(type == REQ_EXEU) {
-        int i, j;
-        char **tokens = NULL;
+        //int pid = fork();
+        //if(pid == 0) {
+            int i, j;
+            char **tokens;
 
-        lseek(out_fd, 0, SEEK_END);
-        dup2(out_fd, 1);
+            printf("handling: %s\n", to_execute);
 
-        execvp(tokens[0], tokens);
+            int n_tokens = separate_string(to_execute, ' ', tokens);
+
+            printf("separated to %d tokens\n", n_tokens);
+
+            for(i = 0; i < n_tokens - 1; i++) printf("%s\n", tokens[i]);
+
+            lseek(out_fd, 0, SEEK_END);
+            dup2(out_fd, 1);
+
+            execvp(tokens[0], tokens);
+        //}
     }
     /*else if(type == REQ_EXEP) {
         int num_comandos = 0;

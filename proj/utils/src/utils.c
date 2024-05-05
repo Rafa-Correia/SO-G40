@@ -4,6 +4,7 @@
 */
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 
 /**
  * Translates integer value into string, the number being translated in the given base(radix).
@@ -73,11 +74,14 @@ int separate_string (const char *s, char separator, char **empty_storage) {
         if(s[i] == separator) tok_count++;
     }
 
-
+    printf("separate_string:\n");
+    printf("handling: %s\n", s);
+    printf("tokens: %d\n", tok_count);
 
     empty_storage = calloc(tok_count, sizeof(char*));
     i = 0;
     while(i < tok_count - 1) {
+        printf("i: %d\n", i);
         empty_storage[i] = calloc(s_len, sizeof(char));
         i++;
     }
@@ -87,7 +91,10 @@ int separate_string (const char *s, char separator, char **empty_storage) {
     j = 0;
     k = 0;
 
+    printf("Separating now...\n");
+
     for(i; s[i]; i++) {
+        printf("i: %d, j: %d, k: %d, s[i]: %c\n", i, j, k, s[i]);
         if(s[i] != separator) {
             empty_storage[k][j] = s[i];
             j++;
@@ -98,6 +105,7 @@ int separate_string (const char *s, char separator, char **empty_storage) {
             j = 0;
         }
     }
+    printf("%s\n", empty_storage[0]);
 
     return tok_count;
 }

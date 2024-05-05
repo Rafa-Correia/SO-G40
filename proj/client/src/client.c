@@ -128,7 +128,7 @@ int main (int argc, char ** argv) {
 
     unsigned short msg_len;
     if(msg_type == REQ_STAT) msg_len = 0;
-    else msg_len = (unsigned short)strlen(argv[4]) + 1;
+    else msg_len = (unsigned short)strlen(argv[4]);
     msg_buf[5] = (msg_len)    &0xFF;
     msg_buf[6] = (msg_len>>8) &0xFF;
 

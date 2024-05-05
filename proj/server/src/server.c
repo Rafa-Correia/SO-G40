@@ -46,6 +46,16 @@ struct request_queue* get_tail (struct request_queue* head) {
     return tmp;
 }
 
+
+void print_queue(struct request_queue *head) {
+    if(head==NULL) printf("Node is empty.\n");
+    else {
+        printf("Task no. %d -> type: %d, to_execute: %s\n", head->task_number, head->type, head->to_execute);
+        print_queue(head->next);
+    }
+}
+
+
 // pipe de leitura tem formato pid + n + mensagem
 
 int check_format (int argc, char **argv) {
@@ -106,43 +116,48 @@ int main(int argc, char **argv) {
 
     //task_number = 0;
 
-    char req_type;                  //request type
-    int  req_pid;                   //requester pid
-    unsigned short req_msg_len;     //message lenght
-    char buffer_msg[300];           //message buffer
+    unsigned char request_buffer[307];
     int req_fd;                     //file descriptor for server to client fifo
 
     mkfifo(SERVER_FIFO, 0666);
 
     // Abrir o pipe de leitura
-    
+    req_fd = open(SERVER_FIFO, O_RDONLY | O_NONBLOCK);
+    if (req_fd < 0) {
+        perror("Erro ao abrir request pipe");
+        return 1;
+    }
+
+    unsigned char request_type;
+    unsigned int requester_pid;
+    unsigned short req_msg_len;
+    char * to_execute;
 
     while(1) {
-        req_fd = open(SERVER_FIFO, O_RDONLY);
-        if (req_fd < 0) {
-            perror("Erro ao abrir request pipe");
-            return 1;
-        }
 
         if(queue_head != NULL) {
+            print_queue(queue_head);
             handle_commmand(queue_head->type, queue_head->task_number, queue_head->to_execute, out_fd);
             queue_head = queue_head->next;
         }
 
-        read(req_fd, &req_type, 1);
-        read(req_fd, &req_pid, 4);
-        read(req_fd, &req_msg_len, 2);
-        read(req_fd, buffer_msg, req_msg_len);
+        int bytes_read = read(req_fd, request_buffer, 307);
 
-        printf("%hu\n", req_msg_len);
+        if(bytes_read <= 0) continue;
 
-        //printf("Requester pid is %d!\n", req_pid);
+        request_type = request_buffer[0];
+        requester_pid = (request_buffer[1] | request_buffer[2] << 8 | request_buffer[3] << 16 | request_buffer[4] << 24);
+        req_msg_len = (request_buffer[5] | request_buffer[6] << 8);
+        to_execute = calloc(req_msg_len + 1, sizeof(char));
+        strcpy(to_execute, request_buffer + 7);
+
+        printf("%d, %d, %d, %s\n", request_type, requester_pid, req_msg_len, to_execute);
 
         char req_pid_string[33];
-        itoa(req_pid, req_pid_string, 10);
+        itoa(requester_pid, req_pid_string, 10);
         
         int feedback = open(req_pid_string, O_WRONLY);
-        if(req_type == REQ_EXEU || req_type == REQ_EXEP) {
+        if(request_type == REQ_EXEU || request_type == REQ_EXEP) {
             task_number++;
             lseek(out_fd, 0, SEEK_SET);
             write(out_fd, &task_number, 4);
@@ -152,10 +167,10 @@ int main(int argc, char **argv) {
             //printf("Done!\n");
             //place request in queue
             struct request_queue* new_request = new_queue_node();
-            new_request->type = req_type;
+            new_request->type = request_type;
             new_request->task_number = task_number;
-            new_request->to_execute = malloc((size_t)req_msg_len);
-            strcpy(new_request->to_execute, buffer_msg);
+            new_request->to_execute = malloc((size_t)req_msg_len + 1);
+            strcpy(new_request->to_execute, to_execute);
 
             if(queue_head == NULL) {
                 queue_head = new_request;
@@ -166,14 +181,10 @@ int main(int argc, char **argv) {
             }
         }
         else {
-            //status here
+            print_queue(queue_head);
             break;
         }
         close(feedback);
-        //_exit(0);
-        
-
-        close(req_fd);
     }
 
 
