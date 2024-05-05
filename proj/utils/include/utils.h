@@ -5,6 +5,6 @@
 
     int is_positive_integer (const char* str);
 
-    int separate_string (const char *s, char separator, char **empty_storage);
+    void separate_string (const char *s, char separator, char **dest);
 
 #endif

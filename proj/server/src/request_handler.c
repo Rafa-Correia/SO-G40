@@ -11,6 +11,10 @@
 
 #include "utils.h"
 
+#ifndef MAX_STR
+#define MAX_STR 301
+#endif
+
 #define REQ_CON (char)0         //REQUEST CONNECTION (through pipe)
 #define REQ_EXEU (char)1        //REQUEST EXECUTE (single)
 #define REQ_EXEP (char)2        //REQUEST EXECUTE (multiple)
@@ -24,24 +28,25 @@ void handle_commmand(unsigned char type, unsigned int task_number, const char *t
     struct timeval start_time, end_time;
 
     if(type == REQ_EXEU) {
-        //int pid = fork();
-        //if(pid == 0) {
-            int i, j;
-            char **tokens;
+        int i, j, n_tokens = 2; //n_tokens starts at 2 bc it will have n tokens + 1 (where n is the number of spaces) and we need space for a NULL in the array
+        for(i = 0; to_execute[i]; i++) if(to_execute[i] == ' ') n_tokens++;
 
-            printf("handling: %s\n", to_execute);
+        size_t s_len = strlen(to_execute);
+        char **tokens = calloc(n_tokens, sizeof(char*));
 
-            int n_tokens = separate_string(to_execute, ' ', tokens);
+        for(i = 0; i < n_tokens - 1; i++) tokens[i] = calloc(s_len, sizeof(char));
+        tokens[n_tokens - 1] = NULL;
 
-            printf("separated to %d tokens\n", n_tokens);
+        separate_string(to_execute, ' ', tokens);
 
-            for(i = 0; i < n_tokens - 1; i++) printf("%s\n", tokens[i]);
+        execvp(tokens[0], tokens);
 
-            lseek(out_fd, 0, SEEK_END);
-            dup2(out_fd, 1);
+        lseek(out_fd, 0, SEEK_END);
 
-            execvp(tokens[0], tokens);
-        //}
+        
+        for(i = 0; i < n_tokens - 1; i++) free(tokens[i]);
+        free(tokens);
+
     }
     /*else if(type == REQ_EXEP) {
         int num_comandos = 0;

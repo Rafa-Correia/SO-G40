@@ -6,6 +6,8 @@
 #include <string.h>
 #include <stdio.h>
 
+#include "utils.h"
+
 /**
  * Translates integer value into string, the number being translated in the given base(radix).
  * value - integer value to translate
@@ -64,49 +66,25 @@ int is_positive_integer (const char* str) {
 /**
  * separate_string will separate given string s into many tokens. This separation will 
  * happen at any occurrence of the separator character. The tokens will be stored in 
- * the empty_storage, as this is it's only purpose. Returns the number of tokens generated.
- * Empty storage is allocated here. Will have one extra 'token' that is NULL.
+ * the dest, which will have to be allocated previously, as this is it's only purpose.
+
 */
-int separate_string (const char *s, char separator, char **empty_storage) {
-    int i, j, k, tok_count = 2; //i and j are common iterators. tok_count will be return value containing number of tokens
-    size_t s_len = strlen(s) + 1;
-    for(i = 0; s[i]; i++) {
-        if(s[i] == separator) tok_count++;
-    }
-
-    printf("separate_string:\n");
-    printf("handling: %s\n", s);
-    printf("tokens: %d\n", tok_count);
-
-    empty_storage = calloc(tok_count, sizeof(char*));
-    i = 0;
-    while(i < tok_count - 1) {
-        printf("i: %d\n", i);
-        empty_storage[i] = calloc(s_len, sizeof(char));
-        i++;
-    }
-    empty_storage[i] = NULL;
+void separate_string (const char *s, char separator, char **dest) {
+    int i, j, k;
 
     i = 0;
     j = 0;
     k = 0;
 
-    printf("Separating now...\n");
-
     for(i; s[i]; i++) {
-        printf("i: %d, j: %d, k: %d, s[i]: %c\n", i, j, k, s[i]);
         if(s[i] != separator) {
-            empty_storage[k][j] = s[i];
+            dest[k][j] = s[i];
             j++;
         }
         else {
-            empty_storage[k][j] = 0;
+            dest[k][j] = 0;
             k++;
             j = 0;
         }
     }
-    printf("%s\n", empty_storage[0]);
-
-    return tok_count;
 }
-

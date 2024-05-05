@@ -1,25 +1,29 @@
-#include <stdio.h>
-#include <stdlib.h>
 #include <unistd.h>
 #include <fcntl.h>
-#include <string.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/time.h>
 
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
 #include "utils.h"
 #include "request_handler.h"
+
 
 #define SERVER_FIFO "sv_fifo"
 #define MAX_TASKS 100 //tem de ser dado como arg
 
-#define SCHED_DEF 1     //ASSUME DEFAULT IS TYPE 1
-#define SCHED_FCFS 1    //scheduling type 1 - First come first served.
-#define SCHED_SJF 2     //scheduling type 2 - Shortest Job First
+#define SCHED_DEF (unsigned char)1     //ASSUME DEFAULT IS TYPE 1
+#define SCHED_FCFS (unsigned char)1    //scheduling type 1 - First come first served.
+#define SCHED_SJF (unsigned char)2     //scheduling type 2 - Shortest Job First
 
-#define REQ_EXEU (unsigned char)1        //REQUEST EXECUTE (single)
-#define REQ_EXEP (unsigned char)2        //REQUEST EXECUTE (multiple)
-#define REQ_STAT (unsigned char)3        //REQUEST STATUS
+#define REQ_EXEU (unsigned char)1           //REQUEST EXECUTE (single)
+#define REQ_EXEP (unsigned char)2           //REQUEST EXECUTE (multiple)
+#define REQ_STAT (unsigned char)3           //REQUEST STATUS
+
+#define REQ_SHUTDOWN (unsigned char)4       //REQUEST SERVER SHUTDOWN         
 
 
 //stuff related to request queue
@@ -27,6 +31,7 @@
 struct request_queue {
     unsigned char type;
     unsigned int task_number;
+    unsigned int expected_execution_time;
     char * to_execute;
     struct request_queue* next;
 };
@@ -40,12 +45,43 @@ struct request_queue* new_queue_node () {
     return new_node;
 }
 
+void free_queue_node (struct request_queue* to_free) {
+    if(to_free == NULL) return;
+    free(to_free->to_execute);
+    free(to_free);
+}
+
+void free_queue (struct request_queue* to_free_head) {
+    struct request_queue* tmp;
+    while(to_free_head) {
+        tmp = to_free_head->next;
+        free(to_free_head);
+        to_free_head = tmp;
+    }
+}
+
 struct request_queue* get_tail (struct request_queue* head) {
     struct request_queue* tmp = head;
     while(tmp->next) tmp = tmp->next;
     return tmp;
 }
 
+void place_request_on_queue (struct request_queue* request, struct request_queue* head, unsigned char scheduling_type) {
+    if(scheduling_type == SCHED_FCFS) { //first come first served
+        if(head == NULL) head = request;
+        else {
+            struct request_queue* tail = get_tail(head);
+            tail->next=request;
+        }
+    }
+
+    else if(scheduling_type == SCHED_SJF) { //shortest job first
+        if(head == NULL) head = request;
+        else {
+            //TODO
+        }
+    }
+}
 
 void print_queue(struct request_queue *head) {
     if(head==NULL) printf("Node is empty.\n");
@@ -79,119 +115,175 @@ int check_format (int argc, char **argv) {
 struct request_queue* queue_head;
 unsigned int task_number;
 
+
+/**
+ * main function in server program
+*/
 int main(int argc, char **argv) {
+
+    //=================================================================================
+    //declaring essential variables to be used later in the program
     int i;                          //general iterator
-    int concurrent_processes;
-    int max_concurrect_processes;
+    int concurrent_processes;       //current amount of opened processes
+    int max_concurrect_processes;   //maximum ammount of opened processes
+    unsigned char sched_type = SCHED_DEF;   //scheduling type
+
+    //initialize queue as empty
     queue_head == NULL;
 
+    //check format of arguments and terminate if not valid
     if(check_format(argc, argv) == 0) return 1;
     max_concurrect_processes = atoi(argv[2]);
+    //=================================================================================
 
-    size_t s_len = strlen(argv[1]);
 
-    char *output_file_path = calloc(s_len + 4, sizeof(char));
-    for(i = 0; i < s_len; i++) {
-        output_file_path[i] = argv[1][i];
-    }
-    output_file_path[s_len] = 'l';
-    output_file_path[s_len+1] = 'o';
-    output_file_path[s_len+2] = 'g';
-    output_file_path[s_len+3] = 0;
 
-    int out_fd = open(output_file_path, O_CREAT | O_RDWR, S_IRWXU | S_IRWXG | S_IRWXO);
+    //=================================================================================
+    //open log file, if doesnt exist create it
 
-    if(out_fd < 0) {
-        perror("open output file");
+    char *log_fpath = calloc(6, sizeof(char));
+    strcpy(log_fpath, "./log");
+
+    int log_fd = open(log_fpath, O_CREAT | O_RDWR, S_IRWXU | S_IRWXG | S_IRWXO);
+
+    if(log_fd < 0) { //in case of open error terminate program
+        perror("open log file");
         return 1;
     }
+    //=================================================================================
 
-    lseek(out_fd, 0, SEEK_SET);
 
-    int bytes_read = read(out_fd, &task_number, 4);
-    if(bytes_read == 0) task_number = 0;
 
-    lseek(out_fd, 0, SEEK_SET);
-    write(out_fd, &task_number, 4);
+    //=================================================================================
+    //read first 4 bytes of log file
+    //these contain the task number last stored by the server
+    lseek(log_fd, 0, SEEK_SET);
 
-    //task_number = 0;
+    int bytes_read = read(log_fd, &task_number, 4);
+    if(bytes_read <= 0) task_number = 0;
 
-    unsigned char request_buffer[307];
+    lseek(log_fd, 0, SEEK_SET);
+    write(log_fd, &task_number, 4);
+    lseek(log_fd, 0, SEEK_END);
+    //=================================================================================
+
+
+    //=================================================================================
+    //open request pipe for client to server comunication
     int req_fd;                     //file descriptor for server to client fifo
-
     mkfifo(SERVER_FIFO, 0666);
 
     // Abrir o pipe de leitura
     req_fd = open(SERVER_FIFO, O_RDONLY | O_NONBLOCK);
-    if (req_fd < 0) {
+    if (req_fd < 0) {   //in case of open error terminate program
         perror("Erro ao abrir request pipe");
         return 1;
     }
+    //=================================================================================
 
+
+
+    //=================================================================================
+    //declare essential variables to read from request pipe
+    unsigned char request_buffer[312];
     unsigned char request_type;
     unsigned int requester_pid;
+    unsigned int request_exp_time;
     unsigned short req_msg_len;
     char * to_execute;
+    //=================================================================================
 
+
+
+    //=================================================================================
     while(1) {
-
+        //=============================================================================
+        //communicate with child processes for request execution
         if(queue_head != NULL) {
             print_queue(queue_head);
-            handle_commmand(queue_head->type, queue_head->task_number, queue_head->to_execute, out_fd);
-            queue_head = queue_head->next;
+            handle_commmand(queue_head->type, queue_head->task_number, queue_head->to_execute, log_fd);
+            struct request_queue *tmp = queue_head->next;
+            free_queue_node(queue_head);
+            queue_head = tmp;
         }
+        //=============================================================================
 
-        int bytes_read = read(req_fd, request_buffer, 307);
+
+
+        //=============================================================================
+        //read request from pipe, if didnt read, continue loop
+        int bytes_read = read(req_fd, request_buffer, 312);
 
         if(bytes_read <= 0) continue;
+        //=============================================================================
 
-        request_type = request_buffer[0];
-        requester_pid = (request_buffer[1] | request_buffer[2] << 8 | request_buffer[3] << 16 | request_buffer[4] << 24);
-        req_msg_len = (request_buffer[5] | request_buffer[6] << 8);
-        to_execute = calloc(req_msg_len + 1, sizeof(char));
-        strcpy(to_execute, request_buffer + 7);
 
-        printf("%d, %d, %d, %s\n", request_type, requester_pid, req_msg_len, to_execute);
 
+        //=============================================================================
+        //move info from buffer to adequate variables
+
+        request_type = request_buffer[0];                                                                                       //type
+        requester_pid = (request_buffer[1] | request_buffer[2] << 8 | request_buffer[3] << 16 | request_buffer[4] << 24);       //pid
+        request_exp_time = (request_buffer[5] | request_buffer[6] << 8 | request_buffer[7] << 16 | request_buffer[8] << 24);    //request expected exec time
+        req_msg_len = (request_buffer[9] | request_buffer[10] << 8);                                                            //request msg length
+        to_execute = calloc(req_msg_len + 1, sizeof(char));                                                                     //allocate memory for execution request msg
+        strcpy(to_execute, request_buffer + 11);                                                                                //copy from buffer to alocated space
+        //=============================================================================
+
+        //debug
+        printf("%d, %d, %d, %hu, %s\n", request_type, requester_pid, request_exp_time, req_msg_len, to_execute);
+
+        //=============================================================================
+        //open feedback pipe for request info (server to client)
         char req_pid_string[33];
         itoa(requester_pid, req_pid_string, 10);
-        
+
         int feedback = open(req_pid_string, O_WRONLY);
+        //=============================================================================
+
+
+
+        //=============================================================================
+        //in case of exec request, place request on queue. 
         if(request_type == REQ_EXEU || request_type == REQ_EXEP) {
             task_number++;
-            lseek(out_fd, 0, SEEK_SET);
-            write(out_fd, &task_number, 4);
 
-            //printf("Writing reply to client...\n");
             write(feedback, &task_number, 4);
-            //printf("Done!\n");
-            //place request in queue
+            close(feedback);
+
+            lseek(log_fd, 0, SEEK_SET);
+            write(log_fd, &task_number, 4);
+
             struct request_queue* new_request = new_queue_node();
             new_request->type = request_type;
             new_request->task_number = task_number;
-            new_request->to_execute = malloc((size_t)req_msg_len + 1);
-            strcpy(new_request->to_execute, to_execute);
+            new_request->expected_execution_time = request_exp_time;
+            new_request->to_execute = to_execute;
 
-            if(queue_head == NULL) {
-                queue_head = new_request;
-            }
-            else {
-                struct request_queue* tail = get_tail(queue_head);
-                tail->next = new_request;
-            }
+            place_request_on_queue(new_request, queue_head, sched_type);
         }
-        else {
-            print_queue(queue_head);
+        //in case of status request, handle status
+        else if(request_type == REQ_STAT) {
+            //print_queue(queue_head);
             break;
         }
-        close(feedback);
+        else if(request_type == REQ_SHUTDOWN) {
+            break;
+        }
+        //=============================================================================
+        
     }
+    //=================================================================================
 
 
 
-
+    //=================================================================================
+    //on closing, free all allocated memory and close pipes (deleting request pipe)
+    free(queue_head);
     // Fechar pipes
     close(req_fd);
+    unlink(SERVER_FIFO);
+    //=================================================================================
 
     return 0;
 }
