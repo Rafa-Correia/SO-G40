@@ -13,10 +13,10 @@
 
 
 #define SERVER_FIFO "sv_fifo"
-#define MAX_TASKS 100 //tem de ser dado como arg
+#define PROC_COUNT_SAFE_MAX 256 //tem de ser dado como arg
 #define MSG_BUF_LEN (size_t)312
 
-#define SCHED_DEF (unsigned char)1     //ASSUME DEFAULT IS TYPE 1
+#define SCHED_DEF (unsigned char)1     //ASSUME DEFAULT IS TYPE 1 - FCFS
 #define SCHED_FCFS (unsigned char)1    //scheduling type 1 - First come first served.
 #define SCHED_SJF (unsigned char)2     //scheduling type 2 - Shortest Job First
 
@@ -114,6 +114,7 @@ int main(int argc, char **argv) {
     int concurrent_processes;       //current amount of opened processes
     int max_concurrect_processes;   //maximum ammount of opened processes
     unsigned char sched_type = SCHED_DEF;   //scheduling type
+    int procs_pipe_fd[PROC_COUNT_SAFE_MAX][2];
 
     //initialize queue as empty
     queue_head == NULL;

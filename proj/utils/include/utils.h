@@ -7,4 +7,6 @@
 
     void separate_string (const char *s, char separator, char **dest);
 
+    void remove_extremity_spaces(char *str);
+
 #endif

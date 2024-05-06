@@ -8,6 +8,9 @@
 
 #include "utils.h"
 
+void remove_start_spaces(char *str);
+void reverse_string(char *str);
+
 /**
  * Translates integer value into string, the number being translated in the given base(radix).
  * value - integer value to translate
@@ -67,7 +70,6 @@ int is_positive_integer (const char* str) {
  * separate_string will separate given string s into many tokens. This separation will 
  * happen at any occurrence of the separator character. The tokens will be stored in 
  * the dest, which will have to be allocated previously, as this is it's only purpose.
-
 */
 void separate_string (const char *s, char separator, char **dest) {
     int i, j, k;
@@ -87,4 +89,44 @@ void separate_string (const char *s, char separator, char **dest) {
             j = 0;
         }
     }
+}
+
+/**
+ * this function removes any spaces in either end of the string given as argument, but not in the middle.
+*/
+void remove_extremity_spaces(char *str) {
+    remove_start_spaces(str);
+    reverse_string(str);
+    remove_start_spaces(str);
+    reverse_string(str);
+}
+
+void remove_start_spaces(char *str) {
+    int read, write, first_char_flag;
+
+    read = 0;
+    write = 0;
+    first_char_flag = 0;
+
+    while(str[read]) {
+        if(str[read] == ' ' && !first_char_flag);
+        else {
+            first_char_flag = 1;
+            str[write] = str[read];
+            write++;
+        }
+        read++;
+    }
+    str[write] = 0;
+}
+
+void reverse_string(char *str) {
+    int read, write;
+    size_t s_len = strlen(str);
+    char *tmp = calloc(s_len + 1, sizeof(char));
+    for(read = 0, write = s_len-1; str[read]; read++, write--) {
+        tmp[write] = str[read];
+    }
+    strcpy(str, tmp);
+    free(tmp);
 }
