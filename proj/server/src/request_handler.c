@@ -98,13 +98,17 @@ void handle_commmand(unsigned char type, unsigned int task_number, const char *t
         close(out_fd);
         //===========================================================================================================================================
 
+
+
+        //===========================================================================================================================================
+        //write to log and shit
         unsigned int tot_time = (end_time.tv_usec - start_time.tv_usec)/1000;
         
         unsigned short len = strlen(tokens[0]);
     
-
-        //write to log and shit
+        //debug
         printf("Write to log: %d, %d, %hu, %s\n", task_number, tot_time, len, tokens[0]);
+
 
         char write_to_log[PREAMBLE + MAX_STR];
         //=============TASK NUMBER============
@@ -125,6 +129,7 @@ void handle_commmand(unsigned char type, unsigned int task_number, const char *t
 
         lseek(log_fd, 0, SEEK_END);
         write(log_fd, write_to_log, PREAMBLE + len);
+        //===========================================================================================================================================
         
         for(i = 0; i < n_tokens - 1; i++) free(tokens[i]);
         free(tokens);
@@ -137,8 +142,6 @@ void handle_commmand(unsigned char type, unsigned int task_number, const char *t
 
         char * *large_tokens/*[MAX_PROG_COUNT]*/;
         char * **final_tokens/*[MAX_PROG_COUNT][MAX_ARG_COUNT]*/;
-
-        
 
         //===========================================================================================================================================
         //allocate memory necessary for large_tokens and fill with separated tokens
@@ -176,6 +179,8 @@ void handle_commmand(unsigned char type, unsigned int task_number, const char *t
         }
         free(large_tokens);
 
+
+        //debug
         for(i = 0; i < cmd_count; i++) {
             printf("\n%d->\n", i);
             for(j = 0; final_tokens[i][j]; j++) {
@@ -210,21 +215,75 @@ void handle_commmand(unsigned char type, unsigned int task_number, const char *t
 
         free(output_file_path);
         //===========================================================================================================================================
-        
-
 
 
 
         //===========================================================================================================================================
         //declare important variables
-        int pid, in_fd, pipe_fd[2];
+        int pid, in_fd, pipe_fd[MAX_PROG_COUNT][2];
         //===========================================================================================================================================
 
         for(i = 0; i < cmd_count; i++) {
-            
-        }
+            if(pipe(pipe_fd[i]) < 0) {
+                perror("pipe");
+                return;
+            }
+            printf("Opened pipe %d\n", i);
+            int pid = fork();
+            if(pid == 0) {//child program
+                int std_out = dup(STDOUT_FILENO);
+                if(i > 0) {
+                    dup2(pipe_fd[i-1][0], STDIN_FILENO);
+                    //close(pipe_fd[i-1][0]);
+                }
+                if(i < cmd_count - 1) {
+                    dup2(pipe_fd[i][1], STDOUT_FILENO);
+                }
+                if(i == cmd_count - 1) {
+                    dup2(out_fd, STDOUT_FILENO);
+                }
+                for(j = 0; j < cmd_count; j++) {
+                    close(pipe_fd[j][0]);
+                    close(pipe_fd[j][1]);
+                }
 
-        //while(wait(NULL) > 0);
+    
+                //debug
+                write(std_out, "Executing command ", 19);
+                char number[33];
+                itoa(i, number, 10);
+                write(std_out, number, strlen(number));
+                write(std_out, "\n", 2);
+
+                //debug over
+                execvp(final_tokens[i][0], final_tokens[i]);
+                write(std_out, "uh oh\n", 7);
+                perror("execvp");
+                _exit(1);
+            }
+            else if (pid < 0) {
+                perror("fork");
+                return;
+            }
+        }
+        
+        for(i = 0; i < cmd_count; i++) {
+            //debug
+
+            printf("Closing %d\n", i);
+
+            //debug over
+            close(pipe_fd[i][0]);
+            close(pipe_fd[i][1]);
+        }
+        for(i = 0; i < cmd_count; i++) wait(NULL);
+        printf("Done!\n");
+        
+
+        //===========================================================================================================================================
+        //write to log
+
+        //===========================================================================================================================================
         //printf("All done!\n");
     }
 
