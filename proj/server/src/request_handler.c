@@ -2,6 +2,7 @@
 #include <fcntl.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 
 #include <sys/time.h>
 
@@ -15,6 +16,8 @@
 #define MAX_STR 301
 #endif
 
+#define PREAMBLE 10
+
 #define REQ_CON (char)0         //REQUEST CONNECTION (through pipe)
 #define REQ_EXEU (char)1        //REQUEST EXECUTE (single)
 #define REQ_EXEP (char)2        //REQUEST EXECUTE (multiple)
@@ -24,7 +27,7 @@
  * handle_command will, as the name indicates, handle a request made by a client. This function receives 4 arguments, first being execution type,
  * second being the task number, third being the whole string of arguments (not separated) and fourth being the output file descriptor.
 */
-void handle_commmand(unsigned char type, unsigned int task_number, const char *to_execute, int out_fd, const char* output_folder) {
+void handle_commmand(unsigned char type, unsigned int task_number, const char *to_execute, int log_fd, const char* output_folder) {
     struct timeval start_time, end_time;
 
     if(type == REQ_EXEU) {
@@ -39,36 +42,72 @@ void handle_commmand(unsigned char type, unsigned int task_number, const char *t
 
         separate_string(to_execute, ' ', tokens);
 
-
+        //create path for output file
         char * output_file_path;        //[folder]/request_[num]_output.txt  ->  strlen(output_folder) + 8 + strlen(num) + 11 + 1 (null terminator)
         char numtmp[33];
         int num_len = itoa(task_number, numtmp, 10);
         size_t folder_len = strlen(output_folder);
 
-
         size_t out_len = folder_len + 8 + num_len + 11 + 1;
 
         output_file_path = calloc(out_len, sizeof(char));
 
+        //create path in outfilepath
         strcpy(output_file_path, output_folder);
         strcpy(output_file_path + folder_len, "request_");
         strcpy(output_file_path + folder_len + 8, numtmp);
         strcpy(output_file_path + folder_len + 8 + num_len , "_output.txt");
 
-        printf("%s\n", output_file_path);
+        //printf("%s\n", output_file_path);
 
+        //open outfile
         int out_fd = open(output_file_path, O_CREAT | O_WRONLY, S_IRWXU);
 
 
+        int status;
+
+        //actually executes the program
+        gettimeofday(&start_time, NULL);
         int pid = fork();
         if(pid == 0) {
             dup2(out_fd, 1);
             execvp(tokens[0], tokens);
         }
+        wait(&status);
+        gettimeofday(&end_time, NULL);
         close(out_fd);
+
+        unsigned int tot_time = (end_time.tv_usec - start_time.tv_usec)/1000;
+        
+        unsigned short len = strlen(tokens[0]);
+    
+
+        //write to log and shit
+        printf("Write to log: %d, %d, %hu, %s\n", task_number, tot_time, len, tokens[0]);
+
+        char write_to_log[PREAMBLE + MAX_STR];
+        //=============TASK NUMBER============
+        write_to_log[0] = (task_number) & 0xFF;
+        write_to_log[1] = (task_number>>8) & 0xFF;
+        write_to_log[2] = (task_number>>16) & 0xFF;
+        write_to_log[3] = (task_number>>24) & 0xFF;
+        //=============TOTAL  TIME============
+        write_to_log[4] = (tot_time) & 0xFF;
+        write_to_log[5] = (tot_time>>8) & 0xFF;
+        write_to_log[6] = (tot_time>>16) & 0xFF;
+        write_to_log[7] = (tot_time>>24) & 0xFF;
+        //=============MESSAGE LEN============
+        write_to_log[8] = (len) & 0xFF;
+        write_to_log[9] = (len>>8) & 0xFF;
+
+        strcpy(write_to_log+10, tokens[0]);
+
+        lseek(log_fd, 0, SEEK_END);
+        write(log_fd, write_to_log, 10 + len);
         
         for(i = 0; i < n_tokens - 1; i++) free(tokens[i]);
         free(tokens);
+        free(output_file_path);
 
     }
     /*else if(type == REQ_EXEP) {

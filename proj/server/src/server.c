@@ -47,7 +47,10 @@ struct request_queue* new_queue_node () {
 }
 
 void free_queue_node (struct request_queue* to_free) {
-    if(to_free == NULL) return;
+    if(to_free == NULL) {
+        printf("NULL!!!!!!!!!!\n");
+        return;
+    }
     free(to_free->to_execute);
     free(to_free);
 }
@@ -130,6 +133,8 @@ int main(int argc, char **argv) {
 
     int log_fd = open(log_fpath, O_CREAT | O_RDWR, S_IRWXU | S_IRWXG | S_IRWXO);
 
+    free(log_fpath);
+
     if(log_fd < 0) { //in case of open error terminate program
         perror("open log file");
         return 1;
@@ -200,7 +205,9 @@ int main(int argc, char **argv) {
         request_buffer = calloc(MSG_BUF_LEN, sizeof(char));
         int bytes_read = read(req_fd, request_buffer, 312);
 
-        if(bytes_read <= 0) continue;
+        if(bytes_read <= 0) {
+            continue;
+        }
         //=============================================================================
 
 
@@ -212,8 +219,10 @@ int main(int argc, char **argv) {
         requester_pid = (request_buffer[1] | request_buffer[2] << 8 | request_buffer[3] << 16 | request_buffer[4] << 24);       //pid
         request_exp_time = (request_buffer[5] | request_buffer[6] << 8 | request_buffer[7] << 16 | request_buffer[8] << 24);    //request expected exec time
         req_msg_len = (request_buffer[9] | request_buffer[10] << 8);                                                            //request msg length                                                      
-        to_execute = calloc(req_msg_len + 1, sizeof(char));                                                                     //allocate memory for execution request msg
-        strcpy(to_execute, request_buffer + 11);                                                                                //copy from buffer to alocated space
+        if(request_type == REQ_EXEP || request_type == REQ_EXEU) {
+            to_execute = calloc(req_msg_len + 1, sizeof(char));                                                                     //allocate memory for execution request msg
+            strcpy(to_execute, request_buffer + 11);    
+        }                                                                            //copy from buffer to alocated space
         //=============================================================================
 
         //debug
@@ -262,6 +271,7 @@ int main(int argc, char **argv) {
             //break;
         }
         else if(request_type == REQ_SHUTDOWN) {
+            free(request_buffer);
             break;
         }
         //=============================================================================
@@ -273,7 +283,7 @@ int main(int argc, char **argv) {
 
     //=================================================================================
     //on closing, free all allocated memory and close pipes (deleting request pipe)
-    free(queue_head);
+    free_queue(queue_head);
     // Fechar pipes
     close(req_fd);
     unlink(SERVER_FIFO);
