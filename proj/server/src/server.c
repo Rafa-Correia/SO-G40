@@ -14,6 +14,7 @@
 
 #define SERVER_FIFO "sv_fifo"
 #define MAX_TASKS 100 //tem de ser dado como arg
+#define MSG_BUF_LEN (size_t)312
 
 #define SCHED_DEF (unsigned char)1     //ASSUME DEFAULT IS TYPE 1
 #define SCHED_FCFS (unsigned char)1    //scheduling type 1 - First come first served.
@@ -66,25 +67,8 @@ struct request_queue* get_tail (struct request_queue* head) {
     return tmp;
 }
 
-void place_request_on_queue (struct request_queue* request, struct request_queue* head, unsigned char scheduling_type) {
-    if(scheduling_type == SCHED_FCFS) { //first come first served
-        if(head == NULL) head = request;
-        else {
-            struct request_queue* tail = get_tail(head);
-            tail->next=request;
-        }
-    }
-
-    else if(scheduling_type == SCHED_SJF) { //shortest job first
-        if(head == NULL) head = request;
-        else {
-            //TODO
-        }
-    }
-}
-
 void print_queue(struct request_queue *head) {
-    if(head==NULL) printf("Node is empty.\n");
+    if(head==NULL) return;
     else {
         printf("Task no. %d -> type: %d, to_execute: %s\n", head->task_number, head->type, head->to_execute);
         print_queue(head->next);
@@ -185,12 +169,12 @@ int main(int argc, char **argv) {
 
     //=================================================================================
     //declare essential variables to read from request pipe
-    unsigned char request_buffer[312];
+    unsigned char *request_buffer = NULL;
     unsigned char request_type;
     unsigned int requester_pid;
     unsigned int request_exp_time;
     unsigned short req_msg_len;
-    char * to_execute;
+    char * to_execute = NULL;
     //=================================================================================
 
 
@@ -201,7 +185,7 @@ int main(int argc, char **argv) {
         //communicate with child processes for request execution
         if(queue_head != NULL) {
             print_queue(queue_head);
-            handle_commmand(queue_head->type, queue_head->task_number, queue_head->to_execute, log_fd);
+            handle_commmand(queue_head->type, queue_head->task_number, queue_head->to_execute, log_fd, argv[1]);
             struct request_queue *tmp = queue_head->next;
             free_queue_node(queue_head);
             queue_head = tmp;
@@ -212,6 +196,8 @@ int main(int argc, char **argv) {
 
         //=============================================================================
         //read request from pipe, if didnt read, continue loop
+        free(request_buffer);
+        request_buffer = calloc(MSG_BUF_LEN, sizeof(char));
         int bytes_read = read(req_fd, request_buffer, 312);
 
         if(bytes_read <= 0) continue;
@@ -225,13 +211,13 @@ int main(int argc, char **argv) {
         request_type = request_buffer[0];                                                                                       //type
         requester_pid = (request_buffer[1] | request_buffer[2] << 8 | request_buffer[3] << 16 | request_buffer[4] << 24);       //pid
         request_exp_time = (request_buffer[5] | request_buffer[6] << 8 | request_buffer[7] << 16 | request_buffer[8] << 24);    //request expected exec time
-        req_msg_len = (request_buffer[9] | request_buffer[10] << 8);                                                            //request msg length
+        req_msg_len = (request_buffer[9] | request_buffer[10] << 8);                                                            //request msg length                                                      
         to_execute = calloc(req_msg_len + 1, sizeof(char));                                                                     //allocate memory for execution request msg
         strcpy(to_execute, request_buffer + 11);                                                                                //copy from buffer to alocated space
         //=============================================================================
 
         //debug
-        printf("%d, %d, %d, %hu, %s\n", request_type, requester_pid, request_exp_time, req_msg_len, to_execute);
+        //printf("%d, %d, %d, %hu, %s\n", request_type, requester_pid, request_exp_time, req_msg_len, to_execute);
 
         //=============================================================================
         //open feedback pipe for request info (server to client)
@@ -258,14 +244,22 @@ int main(int argc, char **argv) {
             new_request->type = request_type;
             new_request->task_number = task_number;
             new_request->expected_execution_time = request_exp_time;
-            new_request->to_execute = to_execute;
+            new_request->to_execute = calloc(req_msg_len + 1, sizeof(char));
+            strcpy(new_request->to_execute, to_execute);
 
-            place_request_on_queue(new_request, queue_head, sched_type);
+
+            if(queue_head == NULL) queue_head = new_request;
+            else {
+                if(sched_type == SCHED_FCFS) {
+                    struct request_queue* tail = get_tail(queue_head);
+                    tail->next = new_request;
+                }
+            }
         }
         //in case of status request, handle status
         else if(request_type == REQ_STAT) {
-            //print_queue(queue_head);
-            break;
+            print_queue(queue_head);
+            //break;
         }
         else if(request_type == REQ_SHUTDOWN) {
             break;

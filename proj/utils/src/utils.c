@@ -46,7 +46,7 @@ int itoa (int value, char *buffer, int radix) {
     }
     buffer[i] = 0;
 
-    return strlen(buffer);
+    return i;
 }
 
 /**

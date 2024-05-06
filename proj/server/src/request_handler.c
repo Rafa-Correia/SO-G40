@@ -24,7 +24,7 @@
  * handle_command will, as the name indicates, handle a request made by a client. This function receives 4 arguments, first being execution type,
  * second being the task number, third being the whole string of arguments (not separated) and fourth being the output file descriptor.
 */
-void handle_commmand(unsigned char type, unsigned int task_number, const char *to_execute, int out_fd) {
+void handle_commmand(unsigned char type, unsigned int task_number, const char *to_execute, int out_fd, const char* output_folder) {
     struct timeval start_time, end_time;
 
     if(type == REQ_EXEU) {
@@ -39,10 +39,33 @@ void handle_commmand(unsigned char type, unsigned int task_number, const char *t
 
         separate_string(to_execute, ' ', tokens);
 
-        execvp(tokens[0], tokens);
 
-        lseek(out_fd, 0, SEEK_END);
+        char * output_file_path;        //[folder]/request_[num]_output.txt  ->  strlen(output_folder) + 8 + strlen(num) + 11 + 1 (null terminator)
+        char numtmp[33];
+        int num_len = itoa(task_number, numtmp, 10);
+        size_t folder_len = strlen(output_folder);
 
+
+        size_t out_len = folder_len + 8 + num_len + 11 + 1;
+
+        output_file_path = calloc(out_len, sizeof(char));
+
+        strcpy(output_file_path, output_folder);
+        strcpy(output_file_path + folder_len, "request_");
+        strcpy(output_file_path + folder_len + 8, numtmp);
+        strcpy(output_file_path + folder_len + 8 + num_len , "_output.txt");
+
+        printf("%s\n", output_file_path);
+
+        int out_fd = open(output_file_path, O_CREAT | O_WRONLY, S_IRWXU);
+
+
+        int pid = fork();
+        if(pid == 0) {
+            dup2(out_fd, 1);
+            execvp(tokens[0], tokens);
+        }
+        close(out_fd);
         
         for(i = 0; i < n_tokens - 1; i++) free(tokens[i]);
         free(tokens);
