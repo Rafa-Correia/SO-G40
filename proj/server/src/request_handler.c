@@ -110,7 +110,7 @@ void handle_commmand(unsigned char type, unsigned int task_number, const char *t
         printf("Write to log: %d, %d, %hu, %s\n", task_number, tot_time, len, tokens[0]);
 
 
-        char write_to_log[PREAMBLE + MAX_STR];
+        unsigned char write_to_log[PREAMBLE + MAX_STR];
         //=============TASK NUMBER============
         write_to_log[0] = (task_number) & 0xFF;
         write_to_log[1] = (task_number>>8) & 0xFF;
@@ -223,15 +223,14 @@ void handle_commmand(unsigned char type, unsigned int task_number, const char *t
         int pid, in_fd, pipe_fd[MAX_PROG_COUNT][2];
         //===========================================================================================================================================
 
+        gettimeofday(&start_time, NULL);
         for(i = 0; i < cmd_count; i++) {
             if(pipe(pipe_fd[i]) < 0) {
                 perror("pipe");
                 return;
             }
-            printf("Opened pipe %d\n", i);
             int pid = fork();
             if(pid == 0) {//child program
-                int std_out = dup(STDOUT_FILENO);
                 if(i > 0) {
                     dup2(pipe_fd[i-1][0], STDIN_FILENO);
                     //close(pipe_fd[i-1][0]);
@@ -247,17 +246,8 @@ void handle_commmand(unsigned char type, unsigned int task_number, const char *t
                     close(pipe_fd[j][1]);
                 }
 
-    
-                //debug
-                write(std_out, "Executing command ", 19);
-                char number[33];
-                itoa(i, number, 10);
-                write(std_out, number, strlen(number));
-                write(std_out, "\n", 2);
-
                 //debug over
                 execvp(final_tokens[i][0], final_tokens[i]);
-                write(std_out, "uh oh\n", 7);
                 perror("execvp");
                 _exit(1);
             }
@@ -268,23 +258,76 @@ void handle_commmand(unsigned char type, unsigned int task_number, const char *t
         }
         
         for(i = 0; i < cmd_count; i++) {
-            //debug
-
-            printf("Closing %d\n", i);
-
-            //debug over
             close(pipe_fd[i][0]);
             close(pipe_fd[i][1]);
         }
         for(i = 0; i < cmd_count; i++) wait(NULL);
-        printf("Done!\n");
-        
+        gettimeofday(&end_time, NULL);
 
         //===========================================================================================================================================
         //write to log
+        unsigned int tot_time = (end_time.tv_usec - start_time.tv_usec) / 1000;
+        unsigned short msg_len = 0;
+        for(i = 0; i < cmd_count; i++) msg_len += strlen(final_tokens[i][0]);
+        msg_len += cmd_count - 1;
+
+        unsigned char write_to_log[PREAMBLE + MAX_STR];
+        
+        //=============TASK NUMBER============
+        write_to_log[0] = (task_number) & 0xFF;
+        write_to_log[1] = (task_number>>8) & 0xFF;
+        write_to_log[2] = (task_number>>16) & 0xFF;
+        write_to_log[3] = (task_number>>24) & 0xFF;
+        //=============TOTAL  TIME============
+        write_to_log[4] = (tot_time) & 0xFF;
+        write_to_log[5] = (tot_time>>8) & 0xFF;
+        write_to_log[6] = (tot_time>>16) & 0xFF;
+        write_to_log[7] = (tot_time>>24) & 0xFF;
+        //=============MESSAGE LEN============
+        write_to_log[8] = (msg_len) & 0xFF;
+        write_to_log[9] = (msg_len>>8) & 0xFF;
+
+        int read_str, write_str;
+        read_str = 0;
+        write_str = 10;
+        i = 0;
+        while(i < cmd_count) {
+            printf("string: %s\n", final_tokens[i][0]);
+            while(final_tokens[i][0][read_str]) {
+                printf("i: %d, read: %d, write: %d, char: %c\n", i, read_str, write_str, final_tokens[i][0][read_str]);
+                write_to_log[write_str] = final_tokens[i][0][read_str];
+                read_str++;
+                write_str++;
+            }
+            if(i < cmd_count - 1) {
+                write_to_log[write_str] = '|';
+                write_str++;
+            }
+            read_str = 0;
+            i++;
+        }
+        printf("Last write: %d\n", write_str);
+        write_to_log[write_str] = 0;
+        printf("full to log: %s\n", write_to_log + 10);
+
+        lseek(log_fd, 0, SEEK_END);
+        write(log_fd, write_to_log, PREAMBLE+msg_len);
 
         //===========================================================================================================================================
-        //printf("All done!\n");
+
+
+
+        //===========================================================================================================================================
+        //free all memory allocated;
+        for(i = 0; i < cmd_count; i++) {
+            j = 0;
+            while(final_tokens[i][j]) {
+                free(final_tokens[i][j]);
+                j++;
+            }
+            free(final_tokens[i]);
+        }
+        free(final_tokens);
     }
 
 }
