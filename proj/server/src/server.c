@@ -3,16 +3,17 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/time.h>
+#include <sys/wait.h>
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
 
 #include "utils.h"
 #include "request_handler.h"
 
-
-#define SERVER_FIFO "sv_fifo"
+#define SERVER_FIFO "../tmp/sv_fifo"
 #define PROC_COUNT_SAFE_MAX 256 //tem de ser dado como arg
 #define MSG_BUF_LEN (size_t)312
 
@@ -27,16 +28,24 @@
 #define REQ_SHUTDOWN (unsigned char)4       //REQUEST SERVER SHUTDOWN         
 
 
-//stuff related to request queue
+#define STATUS_PREAMBLE 7 //is_last_flag(1 byte) + task_number(4 bytes) + cmd_len(2 bytes)
 
+//==============================================REQUEST QUEUE STUFF====================================================
+/**
+ * request queue structure
+*/
 struct request_queue {
-    unsigned char type;
-    unsigned int task_number;
-    unsigned int expected_execution_time;
-    char * to_execute;
+    unsigned char type;   //exec unique or exec pipeline
+    unsigned int task_number;   //specific task number
+    unsigned int expected_execution_time;   //expected runtime (for scheduling)
+    char * to_execute;  //string containing all arguments
     struct request_queue* next;
 };
 
+
+/**
+ * returns new, empty request queue node
+*/
 struct request_queue* new_queue_node () {
     struct request_queue* new_node = malloc(sizeof(struct request_queue));
     new_node->type = 0;
@@ -46,15 +55,21 @@ struct request_queue* new_queue_node () {
     return new_node;
 }
 
+/**
+ * frees single queue node
+*/
 void free_queue_node (struct request_queue* to_free) {
     if(to_free == NULL) {
-        printf("NULL!!!!!!!!!!\n");
         return;
     }
     free(to_free->to_execute);
     free(to_free);
 }
 
+
+/**
+ * frees entire queue
+*/
 void free_queue (struct request_queue* to_free_head) {
     struct request_queue* tmp;
     while(to_free_head) {
@@ -64,12 +79,18 @@ void free_queue (struct request_queue* to_free_head) {
     }
 }
 
+/**
+ * get last element of queue of given head
+*/
 struct request_queue* get_tail (struct request_queue* head) {
     struct request_queue* tmp = head;
     while(tmp->next) tmp = tmp->next;
     return tmp;
 }
 
+/**
+ * purely for debug. Prints table contents
+*/
 void print_queue(struct request_queue *head) {
     if(head==NULL) return;
     else {
@@ -78,28 +99,53 @@ void print_queue(struct request_queue *head) {
     }
 }
 
+void print_queue_node(struct request_queue *head) {
+    if(head==NULL) {
+        printf("Node is empty.\n");
+    }
+    else {
+        printf("Task no. %d -> type: %d, to_execute: %s\n", head->task_number, head->type, head->to_execute);
+    }
+}
+//========================================================================================================================
 
-// pipe de leitura tem formato pid + n + mensagem
 
+
+//========================================================================================================================
+/**
+ * Checks format of given argc and argv. Used exclusively in server's main().
+*/
 int check_format (int argc, char **argv) {
+
+    //CHECK IF CORRECT NMB OF ARGS
     if(argc != 3 && argc != 4) {
         write(STDOUT_FILENO, "Wrong number of arguments!\n", 28);
         return 0;
     }
 
+
+
+    //CHECK IF MAX PARALLEL TASKS IS POSITIVE INT
     if(!(is_positive_integer(argv[2]))) {
         write(STDOUT_FILENO, "'parallel-tasks' field is wrongly formatted (maybe negative?)!\n", 64);
         return 0;
     }
 
-    if(argc == 3) return 1;
+    if(argc == 3) return 1;//early return in case no sched type declared
+
+
+
+    //CHECK IF SCHED TYPE IS VALID
     else {
         //add code here later if we decide to use different scheduling tactics
         return 1;
     }
-}
 
-struct request_queue* queue_head;
+    return 0;
+}
+//========================================================================================================================
+
+struct request_queue* queued_tasks_head;
 unsigned int task_number;
 
 
@@ -110,14 +156,13 @@ int main(int argc, char **argv) {
 
     //=================================================================================
     //declaring essential variables to be used later in the program
-    int i;                          //general iterator
-    int concurrent_processes;       //current amount of opened processes
+    int i, j;                       //general iterator
+    int concurrent_processes = 0;       //current amount of opened processes
     int max_concurrect_processes;   //maximum ammount of opened processes
     unsigned char sched_type = SCHED_DEF;   //scheduling type
-    int procs_pipe_fd[PROC_COUNT_SAFE_MAX][2];
 
     //initialize queue as empty
-    queue_head == NULL;
+    queued_tasks_head == NULL;
 
     //check format of arguments and terminate if not valid
     if(check_format(argc, argv) == 0) return 1;
@@ -148,14 +193,19 @@ int main(int argc, char **argv) {
     //read first 4 bytes of log file
     //these contain the task number last stored by the server
     lseek(log_fd, 0, SEEK_SET);
+    int log_size;
 
     int bytes_read = read(log_fd, &task_number, 4);
     if(bytes_read <= 0) task_number = 0;
+    bytes_read = read(log_fd, &log_size, 4);
+    if(bytes_read <= 0) log_size = 0;
 
     lseek(log_fd, 0, SEEK_SET);
     write(log_fd, &task_number, 4);
+    write(log_fd, &log_size, 4);
     lseek(log_fd, 0, SEEK_END);
     //=================================================================================
+
 
 
     //=================================================================================
@@ -175,27 +225,66 @@ int main(int argc, char **argv) {
 
     //=================================================================================
     //declare essential variables to read from request pipe
-    unsigned char *request_buffer = NULL;
-    unsigned char request_type;
-    unsigned int requester_pid;
-    unsigned int request_exp_time;
-    unsigned short req_msg_len;
-    char * to_execute = NULL;
+    unsigned char *request_buffer = NULL;                                               //buffer holding all request info
+    unsigned char request_type;                                                         //request type(exec single, plural, request status or request shutdown)
+    unsigned int requester_pid;                                                         //requester pid
+    unsigned int request_exp_time;                                                      //request expected exec time (used in scheduling tactic)
+    unsigned short req_msg_len;                                                         //request command and args length
+    char * to_execute = NULL;                                                           //buffer holding request command and args
     //=================================================================================
 
+    concurrent_processes = 0;
+
+    int child_pids[max_concurrect_processes];
+    struct request_queue* in_execution[max_concurrect_processes];
+    for(i = 0; i < max_concurrect_processes; i++) {
+        child_pids[i] = 0;
+        in_execution[i] = NULL;
+    }
+    
 
 
-    //=================================================================================
     while(1) {
         //=============================================================================
         //communicate with child processes for request execution
-        if(queue_head != NULL) {
-            print_queue(queue_head);
-            handle_commmand(queue_head->type, queue_head->task_number, queue_head->to_execute, log_fd, argv[1]);
-            struct request_queue *tmp = queue_head->next;
-            free_queue_node(queue_head);
-            queue_head = tmp;
+        //EXECUTE REQUESTS
+        if(concurrent_processes < max_concurrect_processes && queued_tasks_head != NULL) {
+            for(i = 0; child_pids[i]; i++); //get first slot available
+            in_execution[i] =  queued_tasks_head;
+            queued_tasks_head = queued_tasks_head->next;
+            int pid = fork();
+            if(pid == 0) {  //child
+                handle_commmand(in_execution[i]->type, in_execution[i]->task_number, in_execution[i]->to_execute, log_fd, argv[1]);
+                _exit(0);
+            }
+            //parent
+            child_pids[i] = pid;
+            concurrent_processes++;
+
+
+            //printf("With i: %d, created child %d, to execute %s. (now %d concurrent processes).\n", i, pid, in_execution[i]->to_execute, concurrent_processes);
+            //print_queue_node(in_execution[i]);
         }
+
+        if(concurrent_processes > 0) {
+            for(i = 0; i < max_concurrect_processes; i++) {
+                //printf("Checking %d...\n", i);
+                if(child_pids[i] == 0) continue;
+                int wait_value = waitpid(child_pids[i], NULL, WNOHANG);
+                if(wait_value > 0) {
+                    concurrent_processes--;
+                    //printf("Child %d (%d), executing %s, has finished executing (now %d concurrent processes).\n", i, child_pids[i], in_execution[i]->to_execute, concurrent_processes);
+                    child_pids[i] = 0;
+                    //print_queue_node(in_execution[i]);
+
+                    struct request_queue* to_free = in_execution[i];
+                    in_execution[i] = NULL;
+                    free_queue_node(to_free);
+                    //print_queue_node(in_execution[i]);
+                }
+            }
+        }
+        
         //=============================================================================
 
 
@@ -226,8 +315,7 @@ int main(int argc, char **argv) {
         }                                                                            //copy from buffer to alocated space
         //=============================================================================
 
-        //debug
-        //printf("%d, %d, %d, %hu, %s\n", request_type, requester_pid, request_exp_time, req_msg_len, to_execute);
+
 
         //=============================================================================
         //open feedback pipe for request info (server to client)
@@ -244,12 +332,14 @@ int main(int argc, char **argv) {
         if(request_type == REQ_EXEU || request_type == REQ_EXEP) {
             task_number++;
 
+            //write task number to client
             write(feedback, &task_number, 4);
-            close(feedback);
 
+            //should only write to file if it executed- TODO
             lseek(log_fd, 0, SEEK_SET);
             write(log_fd, &task_number, 4);
 
+            //create new request and set values accordingly
             struct request_queue* new_request = new_queue_node();
             new_request->type = request_type;
             new_request->task_number = task_number;
@@ -257,24 +347,150 @@ int main(int argc, char **argv) {
             new_request->to_execute = calloc(req_msg_len + 1, sizeof(char));
             strcpy(new_request->to_execute, to_execute);
 
-
-            if(queue_head == NULL) queue_head = new_request;
+            //place request on queue
+            if(queued_tasks_head == NULL) queued_tasks_head = new_request;
             else {
-                if(sched_type == SCHED_FCFS) {
-                    struct request_queue* tail = get_tail(queue_head);
+                if(sched_type == SCHED_FCFS) {//first come first served
+                    struct request_queue* tail = get_tail(queued_tasks_head);
                     tail->next = new_request;
                 }
             }
         }
+
         //in case of status request, handle status
         else if(request_type == REQ_STAT) {
-            print_queue(queue_head);
-            //break;
+            int fork_pid = fork();
+            if(fork_pid == 0) {
+                
+                unsigned char is_last_flag;     //if block of data is last then is_last_flag = 1, if queue is empty is_last_flag = 2 <-- ONLY USED IF EXECUTING OR QUEUED
+                unsigned int status_task;       //task number of task in queue
+                unsigned short cmd_len;         //queued command length
+                char * msg;                     //buffer to hold full message to client
+
+                //==============================EXECUTING================================
+
+                for(i = 0; in_execution[i] == NULL && i < max_concurrect_processes; i++);
+                if(i >= max_concurrect_processes) {
+                    is_last_flag = 2;
+                    int one = 1;
+                    write(feedback, &one, 4);
+                    write(feedback, &is_last_flag, 1);
+                }
+                
+                else{
+                    j = 0;
+                    for(i = 0; i < max_concurrect_processes; i++) if(in_execution[i] != NULL) j = i;
+                    //J STORES VALUE OF LARGEST I THAT ISNT EMPTY
+                    for(i = 0; i < max_concurrect_processes; i++) {
+                        if(in_execution[i] == NULL) continue;
+                        if(i == j) is_last_flag = 1;
+                        else is_last_flag = 0;
+                        status_task = in_execution[i]->task_number;
+                        cmd_len = strlen(in_execution[i]->to_execute);
+                        msg = calloc(STATUS_PREAMBLE + cmd_len + 1, sizeof(char));
+
+                        //==============LAST FLAG=============
+                        msg[0] = is_last_flag;
+                        //=============TASK NUMBER============
+                        msg[1] = (status_task) & 0xFF;
+                        msg[2] = (status_task>>8) & 0xFF;
+                        msg[3] = (status_task>>16) & 0xFF;
+                        msg[4] = (status_task>>24) & 0xFF;
+                        //=============MESSAGE LEN============
+                        msg[5] = (cmd_len) & 0xFF;
+                        msg[6] = (cmd_len>>8) & 0xFF;
+
+                        strcpy(msg + STATUS_PREAMBLE, in_execution[i]->to_execute);
+
+                        int full_msg_len = STATUS_PREAMBLE+cmd_len;
+                        write(feedback, &full_msg_len, 4);
+
+                        write(feedback, msg, STATUS_PREAMBLE+cmd_len);
+
+                        free(msg);
+
+                    }
+                }
+                
+                //=======================================================================
+
+
+
+                //===============================QUEUED==================================
+                //printf("Sending queued tasks...\n");
+
+                struct request_queue *tmp = queued_tasks_head;
+
+                if(tmp == NULL) {
+                    //printf("Queue is empty.\n");
+                    is_last_flag = 2;
+                    int one = 1;
+                    write(feedback, &one, 4);
+                    write(feedback, &is_last_flag, 1);
+                }
+                else {
+                    while(tmp) {
+                        is_last_flag = 0;
+                        if(tmp->next == NULL) is_last_flag = 1;
+                        status_task = tmp->task_number;
+                        cmd_len = strlen(tmp->to_execute);
+                        msg = calloc(STATUS_PREAMBLE + cmd_len + 1, sizeof(char));
+
+                        //==============LAST FLAG=============
+                        msg[0] = is_last_flag;
+                        //=============TASK NUMBER============
+                        msg[1] = (status_task) & 0xFF;
+                        msg[2] = (status_task>>8) & 0xFF;
+                        msg[3] = (status_task>>16) & 0xFF;
+                        msg[4] = (status_task>>24) & 0xFF;
+                        //=============MESSAGE LEN============
+                        msg[5] = (cmd_len) & 0xFF;
+                        msg[6] = (cmd_len>>8) & 0xFF;
+
+                        strcpy(msg + STATUS_PREAMBLE, tmp->to_execute);
+
+                        int full_msg_len = STATUS_PREAMBLE+cmd_len;
+                        write(feedback, &full_msg_len, 4);
+
+                        write(feedback, msg, STATUS_PREAMBLE+cmd_len);
+
+                        free(msg);
+
+                        tmp = tmp->next;
+                    }
+                }   
+
+
+                //=======================================================================
+
+
+
+                //=============================COMPLETED=================================
+                //printf("Sending completed tasks...\n");
+                lseek(log_fd, 4, SEEK_SET);
+                read(log_fd, &log_size, 4);
+
+                write(feedback, &log_size, 4);
+
+                char *log_content = calloc(log_size + 1, sizeof(char));
+                int bytes_read = read(log_fd, log_content, log_size);
+
+                write(feedback, log_content, log_size);
+
+                free(log_content);
+                //=======================================================================
+
+                
+                _exit(0);
+            }
         }
+
         else if(request_type == REQ_SHUTDOWN) {
+            close(feedback);
             free(request_buffer);
             break;
         }
+        close(feedback);
         //=============================================================================
         
     }
@@ -284,9 +500,10 @@ int main(int argc, char **argv) {
 
     //=================================================================================
     //on closing, free all allocated memory and close pipes (deleting request pipe)
-    free_queue(queue_head);
+    free_queue(queued_tasks_head);
     // Fechar pipes
     close(req_fd);
+    close(log_fd);
     unlink(SERVER_FIFO);
     //=================================================================================
 

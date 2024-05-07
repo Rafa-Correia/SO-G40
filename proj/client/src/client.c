@@ -10,7 +10,7 @@
 
 #include "utils.h"
 
-#define SERVER_FIFO "sv_fifo"
+#define SERVER_FIFO "../tmp/sv_fifo"
 #define MSG_BUF_LEN (size_t)312 //1 byte for type, 4 bytes for pid, 4 bytes expected runtime, 2 bytes msg_len, max 301 bytes for execution info (null terminated string)
 
 #define REQ_EXEU (unsigned char)1        //REQUEST EXECUTE (single)
@@ -90,6 +90,7 @@ int check_format (int argc, char ** argv) {
  * Main function of the client program.
 */
 int main (int argc, char ** argv) {
+    int i, j;
 
     //=================================================================================
     //check format of program arguments
@@ -162,7 +163,7 @@ int main (int argc, char ** argv) {
     msg_buf[9] =  (msg_len)    &0xFF;
     msg_buf[10] = (msg_len>>8) &0xFF;
 
-    unsigned short i, read_iter = 0;
+    unsigned short read_iter = 0;
     for(i = 11; i < msg_len+11; i++){
         msg_buf[i] = argv[4][read_iter];
         read_iter++;
@@ -195,9 +196,6 @@ int main (int argc, char ** argv) {
      * READ FEEDBACK FROM SERVER
     */
 
-    //===================================================================
-    //===============================TODO================================
-    //===================================================================
 
     if(msg_type == REQ_EXEU || msg_type == REQ_EXEP) {
         int task_number;
@@ -214,7 +212,162 @@ int main (int argc, char ** argv) {
     }
 
     else if(msg_type == REQ_STAT){
-        //todo
+
+        unsigned int task_number;
+        char *msg;
+        
+        char nmb_buf[33];
+        int nmb_len;
+
+        unsigned char is_last_flag;
+        unsigned int full_msg_len;
+
+        //=======================================================EXECUTING TASKS======================================================
+        write(STDOUT_FILENO, "\n>-------------------------------------------------------<\nExecuting\n\n", 71);
+
+        while(1) {
+            int bytes_read = read(feedback_pipe, &full_msg_len, 4);
+            
+            if(bytes_read <= 0) continue;
+
+            msg = calloc(full_msg_len + 1, sizeof(char));
+            read(feedback_pipe, msg, full_msg_len);
+            
+            is_last_flag = msg[0];
+
+            if(is_last_flag == 2) {
+                write(STDOUT_FILENO, "No tasks are executing.\n", 25);
+                free(msg);
+                break;
+            }
+
+            task_number  = (msg[1] | msg[2] << 8 | msg[3] << 16 | msg[4] << 24);
+            msg_len      = (msg[5] | msg[6] << 8);
+
+
+            //=================================WRITE TO CONSOLE (OR STDOUT)===========================================
+            write(STDOUT_FILENO, "Task no. ", 10);
+            
+            nmb_len = itoa(task_number, nmb_buf, 10);
+            write(STDOUT_FILENO, nmb_buf, nmb_len);
+
+            write(STDOUT_FILENO, " --> ", 6);
+
+            write(STDOUT_FILENO, msg+7, msg_len);
+
+            write(STDOUT_FILENO, "\n", 2);
+
+            //========================================================================================================
+
+            free(msg);
+
+            if(is_last_flag == 1) break; //if was last message then break.
+        }
+
+
+        //========================================================QUEUED TASKS========================================================
+        write(STDOUT_FILENO, "\n>-------------------------------------------------------<\nQueued\n\n", 68);
+
+
+        while(1) {
+            int bytes_read = read(feedback_pipe, &full_msg_len, 4);
+            
+            if(bytes_read <= 0) continue;
+
+            msg = calloc(full_msg_len + 1, sizeof(char));
+            read(feedback_pipe, msg, full_msg_len);
+            
+            is_last_flag = msg[0];
+
+            if(is_last_flag == 2) {
+                write(STDOUT_FILENO, "No tasks are queued.\n", 22);
+                free(msg);
+                break;
+            }
+
+            task_number  = (msg[1] | msg[2] << 8 | msg[3] << 16 | msg[4] << 24);
+            msg_len      = (msg[5] | msg[6] << 8);
+
+
+            //=================================WRITE TO CONSOLE (OR STDOUT)===========================================
+            write(STDOUT_FILENO, "Task no. ", 10);
+            
+            nmb_len = itoa(task_number, nmb_buf, 10);
+            write(STDOUT_FILENO, nmb_buf, nmb_len);
+
+            write(STDOUT_FILENO, " --> ", 6);
+
+            write(STDOUT_FILENO, msg+7, msg_len);
+
+            write(STDOUT_FILENO, "\n", 2);
+
+            //========================================================================================================
+
+            free(msg);
+
+            if(is_last_flag == 1) break; //if was last message then break.
+        }
+
+
+
+        //=======================================================COMPLETED TASKS=======================================================
+        write(STDOUT_FILENO, "\n>-------------------------------------------------------<\nCompleted\n\n", 71);
+
+        int log_size;
+        int bytes_read = read(feedback_pipe, &log_size, 4);
+
+        if(bytes_read )
+
+        if(log_size == 0) {
+            write(STDOUT_FILENO, "No tasks completed yet.\n", 25);
+        } 
+
+        else {
+            unsigned char* log_content = calloc(log_size + 1, sizeof(char));
+            read(feedback_pipe, log_content, log_size);
+
+            int execution_t;
+
+
+            int offset = 0;
+            while(offset < log_size) {
+                task_number = (log_content[offset] | log_content[offset+1] << 8 | log_content[offset+2] << 16 | log_content[offset+3] << 24);
+                offset+=4;
+                execution_t = (log_content[offset] | log_content[offset+1] << 8 | log_content[offset+2] << 16 | log_content[offset+3] << 24);
+                offset+=4;
+                msg_len = (log_content[offset] | log_content[offset+1] << 8);
+                offset+=2;
+
+                msg = calloc(msg_len+1, sizeof(char));
+                j=0;
+                for(i = offset; i < offset + msg_len; i++) {
+                    msg[j] = log_content[i];
+                    j++;
+                }
+                offset+=msg_len;
+
+                printf("et: %d\n", execution_t);
+                //=================================WRITE TO CONSOLE (OR STDOUT)===========================================
+                write(STDOUT_FILENO, "Task no. ", 10);
+                nmb_len = itoa(task_number, nmb_buf, 10);
+                write(STDOUT_FILENO, nmb_buf, nmb_len);
+
+                write(STDOUT_FILENO, " --> ", 6);
+
+                write(STDOUT_FILENO, msg, msg_len);
+
+                write(STDOUT_FILENO, ", took ", 8);
+
+                nmb_len = itoa(execution_t, nmb_buf, 10);
+                write(STDOUT_FILENO, nmb_buf, nmb_len);
+
+                write(STDOUT_FILENO, " ms\n", 5);
+                //========================================================================================================
+
+                free(msg);
+            }
+            free(log_content);
+        }
     }
     
     close(feedback_pipe);

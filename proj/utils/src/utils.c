@@ -52,6 +52,7 @@ int itoa (int value, char *buffer, int radix) {
     return i;
 }
 
+
 /**
  * Checks if given string is formatted as valid (positive) integer.
  * returns 0 - not valid

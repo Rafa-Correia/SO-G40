@@ -11,6 +11,7 @@
 #include <string.h>
 
 #include "utils.h"
+#include "request_handler.h"
 
 #ifndef MAX_STR
 #define MAX_STR 301
@@ -83,7 +84,6 @@ void handle_commmand(unsigned char type, unsigned int task_number, const char *t
 
         //===========================================================================================================================================
         //actually executes the program
-        gettimeofday(&start_time, NULL);
         int pid = fork();
         if(pid == 0) {
             dup2(out_fd, 1);
@@ -92,9 +92,10 @@ void handle_commmand(unsigned char type, unsigned int task_number, const char *t
             _exit(1);
         }
         else {
-            wait(NULL);
+            gettimeofday(&start_time, NULL);
+            waitpid(pid, NULL, 0);
+            gettimeofday(&end_time, NULL);
         }
-        gettimeofday(&end_time, NULL);
         close(out_fd);
         //===========================================================================================================================================
 
@@ -102,13 +103,11 @@ void handle_commmand(unsigned char type, unsigned int task_number, const char *t
 
         //===========================================================================================================================================
         //write to log and shit
-        unsigned int tot_time = (end_time.tv_usec - start_time.tv_usec)/1000;
-        
-        unsigned short len = strlen(tokens[0]);
-    
-        //debug
-        printf("Write to log: %d, %d, %hu, %s\n", task_number, tot_time, len, tokens[0]);
+        int tot_time = (end_time.tv_sec - start_time.tv_sec)*1000 + (end_time.tv_usec - start_time.tv_usec)/1000;
 
+    
+        unsigned short msg_len = strlen(tokens[0]);
+    
 
         unsigned char write_to_log[PREAMBLE + MAX_STR];
         //=============TASK NUMBER============
@@ -122,13 +121,19 @@ void handle_commmand(unsigned char type, unsigned int task_number, const char *t
         write_to_log[6] = (tot_time>>16) & 0xFF;
         write_to_log[7] = (tot_time>>24) & 0xFF;
         //=============MESSAGE LEN============
-        write_to_log[8] = (len) & 0xFF;
-        write_to_log[9] = (len>>8) & 0xFF;
+        write_to_log[8] = (msg_len) & 0xFF;
+        write_to_log[9] = (msg_len>>8) & 0xFF;
 
         strcpy(write_to_log+PREAMBLE, tokens[0]);
 
+        int log_length;
+        lseek(log_fd, 4, SEEK_SET);
+        read(log_fd, &log_length, 4);
+        log_length+=PREAMBLE+msg_len;
+        lseek(log_fd, 4, SEEK_SET);
+        write(log_fd, &log_length, 4);
         lseek(log_fd, 0, SEEK_END);
-        write(log_fd, write_to_log, PREAMBLE + len);
+        write(log_fd, write_to_log, PREAMBLE + msg_len);
         //===========================================================================================================================================
         
         for(i = 0; i < n_tokens - 1; i++) free(tokens[i]);
@@ -181,12 +186,6 @@ void handle_commmand(unsigned char type, unsigned int task_number, const char *t
 
 
         //debug
-        for(i = 0; i < cmd_count; i++) {
-            printf("\n%d->\n", i);
-            for(j = 0; final_tokens[i][j]; j++) {
-                printf("\t%d -> %s\n", j, final_tokens[i][j]);
-            }
-        }
 
         //===========================================================================================================================================
         
@@ -266,7 +265,8 @@ void handle_commmand(unsigned char type, unsigned int task_number, const char *t
 
         //===========================================================================================================================================
         //write to log
-        unsigned int tot_time = (end_time.tv_usec - start_time.tv_usec) / 1000;
+        int tot_time = (end_time.tv_sec - start_time.tv_sec)*1000 + (end_time.tv_usec - start_time.tv_usec) / 1000;
+
         unsigned short msg_len = 0;
         for(i = 0; i < cmd_count; i++) msg_len += strlen(final_tokens[i][0]);
         msg_len += cmd_count - 1;
@@ -292,9 +292,9 @@ void handle_commmand(unsigned char type, unsigned int task_number, const char *t
         write_str = 10;
         i = 0;
         while(i < cmd_count) {
-            printf("string: %s\n", final_tokens[i][0]);
+            //printf("string: %s\n", final_tokens[i][0]);
             while(final_tokens[i][0][read_str]) {
-                printf("i: %d, read: %d, write: %d, char: %c\n", i, read_str, write_str, final_tokens[i][0][read_str]);
+                //printf("i: %d, read: %d, write: %d, char: %c\n", i, read_str, write_str, final_tokens[i][0][read_str]);
                 write_to_log[write_str] = final_tokens[i][0][read_str];
                 read_str++;
                 write_str++;
@@ -306,10 +306,16 @@ void handle_commmand(unsigned char type, unsigned int task_number, const char *t
             read_str = 0;
             i++;
         }
-        printf("Last write: %d\n", write_str);
+        //printf("Last write: %d\n", write_str);
         write_to_log[write_str] = 0;
-        printf("full to log: %s\n", write_to_log + 10);
+        //printf("full to log: %s\n", write_to_log + 10);
 
+        int log_length;
+        lseek(log_fd, 4, SEEK_SET);
+        read(log_fd, &log_length, 4);
+        log_length+=PREAMBLE+msg_len;
+        lseek(log_fd, 4, SEEK_SET);
+        write(log_fd, &log_length, 4);
         lseek(log_fd, 0, SEEK_END);
         write(log_fd, write_to_log, PREAMBLE+msg_len);
 
@@ -329,5 +335,4 @@ void handle_commmand(unsigned char type, unsigned int task_number, const char *t
         }
         free(final_tokens);
     }
-
 }
