@@ -19,7 +19,7 @@ UTILS_OBJ = $(OBJ_DIR)/utils.o
 
 # Output binaries
 CLIENT_BIN = $(BIN_DIR)/client
-SERVER_BIN = $(BIN_DIR)/server
+SERVER_BIN = $(BIN_DIR)/orchestrator
 
 # Compiler settings
 CC = gcc
